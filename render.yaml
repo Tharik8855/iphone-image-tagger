@@ -1,14 +1,9 @@
 services:
   - type: web
     name: iphone-image-tagger
-    env: node
+    env: docker
     plan: free
-    buildCommand: npm install
-    startCommand: node server.js
+    dockerfilePath: ./Dockerfile
     envVars:
       - key: PORT
         value: 3000
-    disk:
-      name: tmp-storage
-      mountPath: /tmp
-      sizeGB: 1

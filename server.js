@@ -4,6 +4,9 @@ const { exiftool } = require('exiftool-vendored');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
+const execFileAsync = promisify(execFile);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -30,6 +33,25 @@ const EXT_MAP = {
   'tiff': { ext: '.tiff', mime: 'image/tiff' },
 };
 
+// Real file type of the upload (ignores the filename), e.g. 'PNG', 'JPEG', 'HEIC'
+async function detectType(file) {
+  const t = await exiftool.read(file, ['-FileType']);
+  return String(t.FileType || '').toUpperCase();
+}
+
+const TYPE_FOR_FORMAT = { heic: 'HEIC', jpeg: 'JPEG', png: 'PNG', webp: 'WEBP', tiff: 'TIFF' };
+
+// Convert the upload into the requested format (skipped if it already matches).
+async function convertImage(src, dest, format) {
+  const actual = await detectType(src);
+  if (actual === TYPE_FOR_FORMAT[format] || (format === 'heic' && actual === 'HEIF')) {
+    fs.copyFileSync(src, dest);
+    return;
+  }
+  // [0] = first frame only; -auto-orient bakes rotation in before EXIF is wiped
+  await execFileAsync('convert', [`${src}[0]`, '-auto-orient', '-quality', '95', dest]);
+}
+
 function cleanup(...files) {
   for (const f of files) {
     try { if (f && fs.existsSync(f)) fs.unlinkSync(f); } catch {}
@@ -53,8 +75,9 @@ app.post('/process', upload.single('image'), async (req, res) => {
   const outputName = (filename || 'output').replace(/[^a-zA-Z0-9_\-]/g, '_') + fmt.ext;
 
   try {
-    // Copy uploaded file as-is — no re-encoding, no quality loss
-    fs.copyFileSync(inputPath, workPath);
+    // Convert to the chosen format first (no-op if the upload already matches)
+    const formatKey = EXT_MAP[format] ? format : 'jpeg';
+    await convertImage(inputPath, workPath, formatKey);
 
     // Step 1: Strip ALL existing metadata (simple -all= only, no tagsfromfile)
     await exiftool.write(workPath, {}, ['-all=', '-overwrite_original']);
