@@ -56,14 +56,10 @@ app.post('/process', upload.single('image'), async (req, res) => {
     // Copy uploaded file as-is — no re-encoding, no quality loss
     fs.copyFileSync(inputPath, workPath);
 
-    // Step 1: Strip ALL existing metadata
-    await exiftool.write(workPath, {}, [
-      '-all=',
-      '-tagsfromfile', '@',
-      '-overwrite_original'
-    ]);
+    // Step 1: Strip ALL existing metadata (simple -all= only, no tagsfromfile)
+    await exiftool.write(workPath, {}, ['-all=', '-overwrite_original']);
 
-    // Step 2: Build date string in EXIF format
+    // Step 2: Build date string in EXIF format YYYY:MM:DD HH:MM:SS
     const exifDate = (() => {
       const d = date ? new Date(date.replace(' ', 'T')) : new Date();
       const pad = n => String(n).padStart(2, '0');
