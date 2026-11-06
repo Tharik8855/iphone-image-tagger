@@ -165,10 +165,11 @@
   <div>
     <div class="section-label">Output Format</div>
     <select id="outputFormat">
+      <option value="heic">HEIF (.heic) &mdash; native iPhone format</option>
       <option value="jpeg">JPEG (.jpg) &mdash; most compatible</option>
-      <option value="heif">HEIF (.heic) &mdash; native iPhone format</option>
       <option value="png">PNG (.png) &mdash; lossless</option>
       <option value="webp">WebP (.webp) &mdash; web optimised</option>
+      <option value="tiff">TIFF (.tiff) &mdash; high quality</option>
     </select>
   </div>
 
@@ -224,8 +225,8 @@
     <div class="progress-bar-bg"><div class="progress-bar" id="progressBar"></div></div>
     <div class="progress-steps">
       <div class="step" id="step1">&#9679; Stripping original metadata</div>
-      <div class="step" id="step2">&#9679; Converting to output format</div>
-      <div class="step" id="step3">&#9679; Writing iPhone EXIF tags</div>
+      <div class="step" id="step2">&#9679; Writing iPhone EXIF tags</div>
+      <div class="step" id="step3">&#9679; Adding GPS & date info</div>
       <div class="step" id="step4">&#9679; Preparing download</div>
     </div>
   </div>
@@ -285,7 +286,7 @@
   }
 
   const stepIds = ['step1','step2','step3','step4'];
-  const stepPct = [20, 50, 80, 100];
+  const stepPct = [25, 50, 75, 100];
   let stepTimer;
 
   function startProgress() {
@@ -323,7 +324,7 @@
     document.getElementById('submitBtn').disabled = true;
 
     const format = document.getElementById('outputFormat').value;
-    const extMap = { jpeg: '.jpg', heif: '.heic', png: '.png', webp: '.webp' };
+    const extMap = { heic: '.heic', jpeg: '.jpg', png: '.png', webp: '.webp', tiff: '.tiff' };
     const ext = extMap[format] || '.jpg';
 
     const form = new FormData();
