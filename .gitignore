@@ -1,0 +1,8 @@
+node_modules/
+*.jpg
+*.jpeg
+*.png
+*.heic
+*.webp
+*.tmp
+.env
