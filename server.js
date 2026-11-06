@@ -1,7 +1,6 @@
 const express = require('express');
 const multer = require('multer');
 const { exiftool } = require('exiftool-vendored');
-const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -23,11 +22,12 @@ const IPHONE_PROFILES = {
   'iPhone 12 Pro Max': { model: 'iPhone 12 Pro Max', software: '16.7.2', lensMake: 'Apple', lensModel: 'iPhone 12 Pro Max back triple camera 5.1mm f/1.6' },
 };
 
-const FORMAT_MAP = {
-  'jpeg': { ext: '.jpg',  mime: 'image/jpeg',   sharpFormat: 'jpeg' },
-  'heif': { ext: '.heic', mime: 'image/heic',   sharpFormat: 'heif' },
-  'png':  { ext: '.png',  mime: 'image/png',    sharpFormat: 'png'  },
-  'webp': { ext: '.webp', mime: 'image/webp',   sharpFormat: 'webp' },
+const EXT_MAP = {
+  'heic': { ext: '.heic', mime: 'image/heic' },
+  'jpeg': { ext: '.jpg',  mime: 'image/jpeg' },
+  'png':  { ext: '.png',  mime: 'image/png'  },
+  'webp': { ext: '.webp', mime: 'image/webp' },
+  'tiff': { ext: '.tiff', mime: 'image/tiff' },
 };
 
 function cleanup(...files) {
@@ -47,34 +47,40 @@ app.post('/process', upload.single('image'), async (req, res) => {
     return res.status(400).json({ error: 'Invalid iPhone model.' });
   }
 
-  const fmt = FORMAT_MAP[format] || FORMAT_MAP['jpeg'];
+  const fmt = EXT_MAP[format] || EXT_MAP['jpeg'];
   const tmpDir = os.tmpdir();
-  const strippedPath = path.join(tmpDir, `stripped_${Date.now()}${fmt.ext}`);
+  const workPath = path.join(tmpDir, `work_${Date.now()}${fmt.ext}`);
   const outputName = (filename || 'output').replace(/[^a-zA-Z0-9_\-]/g, '_') + fmt.ext;
 
   try {
-    // Step 1: Convert format and strip metadata using sharp
-    await sharp(inputPath)
-      .toFormat(fmt.sharpFormat, { quality: 95 })
-      .toFile(strippedPath);
+    // Copy uploaded file as-is — no re-encoding, no quality loss
+    fs.copyFileSync(inputPath, workPath);
 
-    // Step 2: Build EXIF date format YYYY:MM:DD HH:MM:SS
-    const exifDateFormatted = (() => {
+    // Step 1: Strip ALL existing metadata
+    await exiftool.write(workPath, {}, [
+      '-all=',
+      '-tagsfromfile', '@',
+      '-overwrite_original'
+    ]);
+
+    // Step 2: Build date string in EXIF format
+    const exifDate = (() => {
       const d = date ? new Date(date.replace(' ', 'T')) : new Date();
       const pad = n => String(n).padStart(2, '0');
       return `${d.getFullYear()}:${pad(d.getMonth()+1)}:${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     })();
 
+    // Step 3: Write fresh iPhone EXIF tags
     const tags = {
       Make: 'Apple',
       Model: profile.model,
       Software: profile.software,
       LensMake: profile.lensMake,
       LensModel: profile.lensModel,
-      DateTimeOriginal: exifDateFormatted,
-      CreateDate: exifDateFormatted,
-      ModifyDate: exifDateFormatted,
-      DateTimeDigitized: exifDateFormatted,
+      DateTimeOriginal: exifDate,
+      CreateDate: exifDate,
+      ModifyDate: exifDate,
+      DateTimeDigitized: exifDate,
       HostComputer: profile.model,
       FNumber: 1.78,
       ExposureProgram: 'Program AE',
@@ -105,17 +111,17 @@ app.post('/process', upload.single('image'), async (req, res) => {
       tags.GPSAltitudeRef = 0;
     }
 
-    await exiftool.write(strippedPath, tags, ['-overwrite_original']);
+    await exiftool.write(workPath, tags, ['-overwrite_original']);
 
     res.setHeader('Content-Disposition', `attachment; filename="${outputName}"`);
     res.setHeader('Content-Type', fmt.mime);
-    const stream = fs.createReadStream(strippedPath);
+    const stream = fs.createReadStream(workPath);
     stream.pipe(res);
-    stream.on('end', () => cleanup(inputPath, strippedPath));
-    stream.on('error', () => cleanup(inputPath, strippedPath));
+    stream.on('end', () => cleanup(inputPath, workPath));
+    stream.on('error', () => cleanup(inputPath, workPath));
 
   } catch (err) {
-    cleanup(inputPath, strippedPath);
+    cleanup(inputPath, workPath);
     console.error(err);
     res.status(500).json({ error: err.message });
   }
