@@ -154,7 +154,7 @@
   <div>
     <div class="section-label">iPhone Model</div>
     <select id="iphoneModel">
-      <option value="iPhone 17 Pro">iPhone 17 Pro &mdash; iOS 18.4.1</option>
+      <option value="iPhone 17 Pro">iPhone 17 Pro &mdash; iOS 26.1</option>
       <option value="iPhone 15 Pro">iPhone 15 Pro &mdash; iOS 17.4.1</option>
       <option value="iPhone 14 Pro">iPhone 14 Pro &mdash; iOS 17.4.1</option>
       <option value="iPhone 12 Pro Max">iPhone 12 Pro Max &mdash; iOS 16.7.2</option>
@@ -207,7 +207,7 @@
   <div>
     <div class="section-label">Date &amp; Time Taken</div>
     <input type="datetime-local" id="recordDate">
-    <div class="input-hint">Leave blank to use today's date</div>
+    <div class="input-hint">Clock time at the GPS location (Ireland time if no GPS). Leave blank to use the time now.</div>
   </div>
 
   <hr class="divider">
@@ -420,8 +420,11 @@
       const a = document.createElement('a');
       a.href = url;
       a.download = (document.getElementById('outputFilename').value || 'tagged_image').replace(/[^a-zA-Z0-9_\-]/g,'_') + ext;
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
+      a.remove();
+      // Safari can cancel the download if the link is removed too fast
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
       document.getElementById('successBox').classList.add('show');
     } catch(e) {
       stopProgress(false);
