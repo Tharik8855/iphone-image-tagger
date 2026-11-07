@@ -15,6 +15,9 @@ const PORT = process.env.PORT || 3000;
 // Time zone used when no GPS is given
 const DEFAULT_TZ = process.env.DEFAULT_TZ || 'Europe/Dublin';
 
+const P3_ICC = path.join(__dirname, 'icc', 'DisplayP3.icc');
+const SRGB_ICC = path.join(__dirname, 'icc', 'sRGB.icc');
+
 const upload = multer({
   dest: os.tmpdir(),
   limits: { fileSize: 100 * 1024 * 1024 }
@@ -24,32 +27,75 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Main (1x) camera details for each model.
 // maxLong = long side of the photo that model's camera saves by default.
+// released = the day the phone went on sale (photos can't be older than this).
 const IPHONE_PROFILES = {
   'iPhone 17 Pro': {
-    model: 'iPhone 17 Pro', software: '26.1',
+    model: 'iPhone 17 Pro', released: '2025-09-19',
     lensModel: 'iPhone 17 Pro back triple camera 6.765mm f/1.78',
     lensInfo: '2.220000029 8.999999759 1.78 2.8',
     fNumber: 1.78, focalLength: 6.765, focal35: 24, maxLong: 5712,
   },
   'iPhone 15 Pro': {
-    model: 'iPhone 15 Pro', software: '17.4.1',
+    model: 'iPhone 15 Pro', released: '2023-09-22',
     lensModel: 'iPhone 15 Pro back triple camera 6.765mm f/1.78',
     lensInfo: '2.220000029 8.999999759 1.78 2.8',
     fNumber: 1.78, focalLength: 6.765, focal35: 24, maxLong: 5712,
   },
   'iPhone 14 Pro': {
-    model: 'iPhone 14 Pro', software: '17.4.1',
+    model: 'iPhone 14 Pro', released: '2022-09-16',
     lensModel: 'iPhone 14 Pro back triple camera 6.86mm f/1.78',
     lensInfo: '2.220000029 8.999999759 1.78 2.8',
     fNumber: 1.78, focalLength: 6.86, focal35: 24, maxLong: 4032,
   },
   'iPhone 12 Pro Max': {
-    model: 'iPhone 12 Pro Max', software: '16.7.2',
+    model: 'iPhone 12 Pro Max', released: '2020-11-13',
     lensModel: 'iPhone 12 Pro Max back triple camera 5.1mm f/1.6',
     lensInfo: '1.539999962 7.5 1.6 2.4',
     fNumber: 1.6, focalLength: 5.1, focal35: 26, maxLong: 4032,
   },
 };
+
+// iOS releases (version, release date). The photo gets the newest version
+// that had been out for at least IOS_UPDATE_LAG_DAYS before the photo date.
+const IOS_RELEASES = [
+  ['14.2', '2020-11-05'], ['14.2.1', '2020-11-19'], ['14.3', '2020-12-14'], ['14.4', '2021-01-26'],
+  ['14.4.1', '2021-03-08'], ['14.4.2', '2021-03-26'], ['14.5', '2021-04-26'], ['14.5.1', '2021-05-03'],
+  ['14.6', '2021-05-24'], ['14.7', '2021-07-19'], ['14.7.1', '2021-07-26'], ['14.8', '2021-09-13'],
+  ['15.0', '2021-09-20'], ['15.0.1', '2021-10-01'], ['15.0.2', '2021-10-11'], ['15.1', '2021-10-25'],
+  ['15.1.1', '2021-11-17'], ['15.2', '2021-12-13'], ['15.2.1', '2022-01-12'], ['15.3', '2022-01-26'],
+  ['15.3.1', '2022-02-10'], ['15.4', '2022-03-14'], ['15.4.1', '2022-03-31'], ['15.5', '2022-05-16'],
+  ['15.6', '2022-07-20'], ['15.6.1', '2022-08-17'], ['16.0', '2022-09-12'], ['16.0.2', '2022-09-22'],
+  ['16.0.3', '2022-10-10'], ['16.1', '2022-10-24'], ['16.1.1', '2022-11-09'], ['16.1.2', '2022-11-30'],
+  ['16.2', '2022-12-13'], ['16.3', '2023-01-23'], ['16.3.1', '2023-02-13'], ['16.4', '2023-03-27'],
+  ['16.4.1', '2023-04-07'], ['16.5', '2023-05-18'], ['16.5.1', '2023-06-21'], ['16.6', '2023-07-24'],
+  ['16.6.1', '2023-09-07'], ['17.0', '2023-09-18'], ['17.0.2', '2023-09-21'], ['17.0.3', '2023-10-04'],
+  ['17.1', '2023-10-25'], ['17.1.1', '2023-11-07'], ['17.1.2', '2023-11-30'], ['17.2', '2023-12-11'],
+  ['17.2.1', '2023-12-19'], ['17.3', '2024-01-22'], ['17.3.1', '2024-02-08'], ['17.4', '2024-03-05'],
+  ['17.4.1', '2024-03-21'], ['17.5', '2024-05-13'], ['17.5.1', '2024-05-20'], ['17.6', '2024-07-29'],
+  ['17.6.1', '2024-08-07'], ['18.0', '2024-09-16'], ['18.0.1', '2024-10-03'], ['18.1', '2024-10-28'],
+  ['18.1.1', '2024-11-19'], ['18.2', '2024-12-11'], ['18.2.1', '2025-01-06'], ['18.3', '2025-01-27'],
+  ['18.3.1', '2025-02-10'], ['18.3.2', '2025-03-11'], ['18.4', '2025-03-31'], ['18.4.1', '2025-04-16'],
+  ['18.5', '2025-05-12'], ['18.6', '2025-07-29'], ['18.6.2', '2025-08-20'], ['26.0', '2025-09-15'],
+  ['26.0.1', '2025-09-29'], ['26.1', '2025-11-03'], ['26.2', '2025-12-12'], ['26.2.1', '2026-01-26'],
+  ['26.3', '2026-02-11'], ['26.3.1', '2026-03-04'], ['26.4', '2026-03-24'], ['26.4.1', '2026-04-08'],
+  ['26.4.2', '2026-04-22'], ['26.5', '2026-05-11'], ['26.6', '2026-07-27'], ['26.7.1', '2026-09-28'],
+].map(([v, d]) => [v, Date.parse(d + 'T00:00:00Z')]);
+const IOS_UPDATE_LAG_DAYS = 7;
+
+// Picks the iOS version for a photo date (wall-clock ms) and phone
+function iosFor(wallMs, profile) {
+  const cutoff = wallMs - IOS_UPDATE_LAG_DAYS * 86400000;
+  const released = Date.parse(profile.released + 'T00:00:00Z');
+  let pick = null;
+  for (const [v, d] of IOS_RELEASES) {
+    if (d <= cutoff) pick = v;
+  }
+  // Brand-new phones ship with the version that was current on launch day
+  if (!pick || Date.parse(profile.released) > cutoff) {
+    for (const [v, d] of IOS_RELEASES) if (d <= released) pick = v;
+  }
+  return pick;
+}
 
 const EXT_MAP = {
   'heic': { ext: '.heic', mime: 'image/heic' },
@@ -59,48 +105,73 @@ const EXT_MAP = {
   'tiff': { ext: '.tiff', mime: 'image/tiff' },
 };
 
-const TYPE_FOR_FORMAT = { heic: 'HEIC', jpeg: 'JPEG', png: 'PNG', webp: 'WEBP', tiff: 'TIFF' };
-
 function tmpFile(ext) {
   return path.join(os.tmpdir(), `work_${crypto.randomUUID()}${ext}`);
 }
 
-// Converts to the chosen format, turns the photo upright and shrinks it
-// to the chosen model's photo size. Copies as-is when nothing needs changing.
+let heifEncAvailable = null;
+async function hasHeifEnc() {
+  if (heifEncAvailable === null) {
+    try { await execFileAsync('heif-enc', ['--version']); heifEncAvailable = true; }
+    catch (e) { heifEncAvailable = !!(e && e.code !== 'ENOENT' && e.code !== 127); }
+  }
+  return heifEncAvailable;
+}
+
+// Turns the photo upright, shrinks it to the model's photo size, converts colours
+// to Display P3 (like iPhone photos) and saves in the chosen format.
+// JPEG portrait photos are stored sideways with a rotate tag, the way iPhones save them.
+// Returns { orientation } to write into the EXIF.
 async function convertImage(src, dest, format, maxLong) {
   const info = await exiftool.read(src);
   const type = String(info.FileType || '').toUpperCase();
   const isHeif = type === 'HEIC' || type === 'HEIF';
-  const sameType = type === TYPE_FOR_FORMAT[format] || (format === 'heic' && isHeif);
-  const orient = Number(info.Orientation) || 1;
-  const w = Number(info.ImageWidth) || 0;
-  const h = Number(info.ImageHeight) || 0;
-  const tooBig = Math.max(w, h) > maxLong;
-
-  // HEIC rotation lives in the image itself (not the EXIF tag), so a HEIC copy stays upright
-  if (sameType && !tooBig && (orient === 1 || isHeif)) {
-    fs.copyFileSync(src, dest);
-    return;
-  }
+  const hasIcc = !!info.ProfileDescription;
 
   let input = src;
   let tmpInput = null;
   if (isHeif) {
     // HEIC decoding already applies the rotation; drop the EXIF tag so it isn't rotated twice
-    tmpInput = tmpFile(path.extname(src) || '.heic');
+    tmpInput = tmpFile('.heic');
     fs.copyFileSync(src, tmpInput);
     await exiftool.write(tmpInput, {}, ['-Orientation=', '-overwrite_original']);
     input = tmpInput;
   }
+
+  const base = [`${input}[0]`, '-auto-orient', '-resize', `${maxLong}x${maxLong}>`];
+  // No profile = treat as sRGB; then convert to Display P3
+  const colour = hasIcc ? ['-profile', P3_ICC] : ['-profile', SRGB_ICC, '-profile', P3_ICC];
+
+  let orientation = 1;
+  const tmpPng = tmpFile('.png');
   try {
-    await execFileAsync('convert', [
-      `${input}[0]`, '-auto-orient',
-      '-resize', `${maxLong}x${maxLong}>`,
-      '-quality', '95', dest,
-    ]);
+    if (format === 'jpeg') {
+      // Check if it's portrait after turning upright
+      await execFileAsync('convert', [...base, ...colour, '-depth', '8', tmpPng]);
+      const dims = await exiftool.read(tmpPng);
+      const portrait = Number(dims.ImageHeight) > Number(dims.ImageWidth);
+      const args = [tmpPng];
+      if (portrait) { args.push('-rotate', '-90'); orientation = 6; }
+      args.push('-sampling-factor', '4:2:0', '-quality', '92', dest);
+      await execFileAsync('convert', args);
+    } else if (format === 'heic' && await hasHeifEnc()) {
+      // heif-enc gives 8-bit HEIC with a built-in preview image, like an iPhone
+      await execFileAsync('convert', [...base, ...colour, '-depth', '8', tmpPng]);
+      await execFileAsync('heif-enc', ['-q', '90', '-t', '320', '-o', dest, tmpPng]);
+    } else {
+      await execFileAsync('convert', [...base, ...colour, '-depth', '8', '-quality', '95', dest]);
+    }
   } finally {
-    cleanup(tmpInput);
+    cleanup(tmpInput, tmpPng);
   }
+  return { orientation };
+}
+
+// Small 160x120-style preview stored inside JPEG EXIF (iPhones include one)
+async function makeExifThumbnail(jpegPath) {
+  const thumb = tmpFile('.jpg');
+  await execFileAsync('convert', [jpegPath, '-thumbnail', '160x160', '-strip', '-quality', '80', thumb]);
+  return thumb;
 }
 
 function cleanup(...files) {
@@ -203,38 +274,47 @@ app.post('/process', upload.single('image'), async (req, res) => {
   const fmt = EXT_MAP[formatKey];
   const workPath = tmpFile(fmt.ext);
   const outputName = (filename || 'output').replace(/[^a-zA-Z0-9_\-]/g, '_') + fmt.ext;
+  let thumbPath = null;
 
   try {
-    await convertImage(inputPath, workPath, formatKey, profile.maxLong);
-
-    // Step 1: strip all metadata incl. XMP, but keep the colour profile so colours don't shift
-    await exiftool.write(workPath, {}, ['-all=', '--ICC_Profile:all', '-overwrite_original']);
-
-    const after = await exiftool.read(workPath);
-    const outW = Number(after.ImageWidth) || undefined;
-    const outH = Number(after.ImageHeight) || undefined;
-    const isP3 = /p3/i.test(String(after.ProfileDescription || ''));
-
-    // Step 2: location + time zone
+    // Location + time zone
     const latN = validCoord(req.body.lat, 90);
     const lonN = validCoord(req.body.lon, 180);
     const hasGPS = latN !== null && lonN !== null;
     const tz = zoneFor(hasGPS ? latN : null, hasGPS ? lonN : null);
 
-    // Step 3: dates — the time you enter is the clock time at the photo's location.
+    // Dates — the time you enter is the clock time at the photo's location.
     // Blank = the current time there.
     const baseWall = parseWall(date) ?? (Date.now() + offsetMinutes(tz, Date.now()) * 60000);
     const secOffset = Math.floor(Math.random() * 59) + 1;
     const wall = new Date(baseWall + secOffset * 1000);
+
+    if (wall.getTime() < Date.parse(profile.released + 'T00:00:00Z')) {
+      cleanup(inputPath);
+      return res.status(400).json({ error: `The ${profile.model} came out on ${profile.released}. Pick a date after that.` });
+    }
+
     const offMin = wallOffset(tz, wall.getTime());
     const tzOffset = fmtOffset(offMin);
     const utc = new Date(wall.getTime() - offMin * 60000);
+    const software = iosFor(wall.getTime(), profile);
+
+    const { orientation } = await convertImage(inputPath, workPath, formatKey, profile.maxLong);
+
+    // Strip all metadata incl. XMP, but keep the colour profile
+    await exiftool.write(workPath, {}, ['-all=', '--ICC_Profile:all', '-overwrite_original']);
+
+    // Stored pixel size (JPEG portraits are stored sideways, like an iPhone)
+    const after = await exiftool.read(workPath);
+    const outW = Number(after.ImageWidth) || 0;
+    const outH = Number(after.ImageHeight) || 0;
+    const isP3 = /p3/i.test(String(after.ProfileDescription || ''));
 
     const pad = n => String(n).padStart(2, '0');
     const exifDate = `${wall.getUTCFullYear()}:${pad(wall.getUTCMonth() + 1)}:${pad(wall.getUTCDate())} ${pad(wall.getUTCHours())}:${pad(wall.getUTCMinutes())}:${pad(wall.getUTCSeconds())}`;
     const subSec = String(Math.floor(Math.random() * 999)).padStart(3, '0');
 
-    // Step 4: exposure — your values win, blanks fall back to auto
+    // Exposure — your values win, blanks fall back to auto
     const auto = autoExposure(wall.getUTCHours());
     const iso = parseNum(req.body.iso) ?? auto.iso;
     const exposureTime = parseShutter(req.body.shutter) ?? auto.shutter;
@@ -244,10 +324,18 @@ app.post('/process', upload.single('image'), async (req, res) => {
       : parseFloat((auto.brightness + (Math.random() * 0.3 - 0.15)).toFixed(4));
     const bias = parseNum(req.body.bias) ?? 0;
 
+    // Focus/metering area in the middle of the frame (sensor = landscape)
+    const longSide = Math.max(outW, outH);
+    const shortSide = Math.min(outW, outH);
+    const subjectArea = longSide && shortSide
+      ? `${Math.round(longSide / 2)} ${Math.round(shortSide / 2)} ${Math.round(longSide * 0.55)} ${Math.round(shortSide * 0.44)}`
+      : undefined;
+
     const tags = {
       Make: 'Apple',
       Model: profile.model,
-      Software: profile.software,
+      Orientation: orientation === 6 ? 'Rotate 90 CW' : 'Horizontal (normal)',
+      Software: software,
       HostComputer: profile.model,
       LensMake: 'Apple',
       LensModel: profile.lensModel,
@@ -279,7 +367,7 @@ app.post('/process', upload.single('image'), async (req, res) => {
       ExposureMode: 'Auto',
       SensingMethod: 'One-chip color area',
       SceneType: 'Directly photographed',
-      'XMP-xmp:CreatorTool': profile.software,
+      'XMP-xmp:CreatorTool': software,
       'XMP-xmp:CreateDate': `${exifDate}${tzOffset}`,
       'XMP-xmp:ModifyDate': `${exifDate}${tzOffset}`,
       'XMP-photoshop:DateCreated': `${exifDate}${tzOffset}`,
@@ -288,6 +376,7 @@ app.post('/process', upload.single('image'), async (req, res) => {
       tags.ExifImageWidth = outW;
       tags.ExifImageHeight = outH;
     }
+    if (subjectArea) tags['SubjectArea'] = subjectArea;
 
     if (hasGPS) {
       const altN = parseFloat(alt);
@@ -305,7 +394,13 @@ app.post('/process', upload.single('image'), async (req, res) => {
       tags.GPSTimeStamp = `${pad(utc.getUTCHours())}:${pad(utc.getUTCMinutes())}:${pad(utc.getUTCSeconds())}`;
     }
 
-    await exiftool.write(workPath, tags, ['-XMP-x:XMPToolkit=', '-overwrite_original']);
+    const extraArgs = ['-XMP-x:XMPToolkit=', '-overwrite_original'];
+    if (formatKey === 'jpeg') {
+      thumbPath = await makeExifThumbnail(workPath);
+      extraArgs.push(`-ThumbnailImage<=${thumbPath}`);
+    }
+    await exiftool.write(workPath, tags, extraArgs);
+    cleanup(thumbPath);
 
     res.setHeader('Content-Disposition', `attachment; filename="${outputName}"`);
     res.setHeader('Content-Type', fmt.mime);
@@ -316,7 +411,7 @@ app.post('/process', upload.single('image'), async (req, res) => {
     stream.pipe(res);
 
   } catch (err) {
-    cleanup(inputPath, workPath);
+    cleanup(inputPath, workPath, thumbPath);
     console.error(err);
     res.status(500).json({ error: err.message });
   }
