@@ -73,6 +73,7 @@
   }
   select:focus { outline: none; border-color: #6e78ff; }
   .input-row.three { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .input-row.two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
   input[type="text"], input[type="number"], input[type="datetime-local"] {
     width: 100%;
     padding: 12px 14px;
@@ -131,7 +132,7 @@
 
 <div class="logo">Image Tools</div>
 <h1>iPhone Image Tagger</h1>
-<p class="subtitle">Strip & replace image metadata to match any iPhone model</p>
+<p class="subtitle">Strip &amp; replace image metadata to match any iPhone model</p>
 
 <div class="card">
 
@@ -212,6 +213,42 @@
   <hr class="divider">
 
   <div>
+    <div class="section-label">Camera Exposure</div>
+    <select id="expPreset" onchange="applyExposurePreset()">
+      <option value="auto">Auto &mdash; match the time of day</option>
+      <option value="daylight">Bright daylight</option>
+      <option value="overcast">Overcast / shade</option>
+      <option value="indoor">Indoor (room light)</option>
+      <option value="lowlight">Low light / evening</option>
+      <option value="night">Night</option>
+      <option value="custom">Custom (my own values)</option>
+    </select>
+    <div class="input-row three" style="margin-top:12px">
+      <div>
+        <input type="number" id="expISO" placeholder="ISO" step="1" min="20" oninput="markCustom()">
+        <div class="input-hint">ISO &middot; e.g. 50</div>
+      </div>
+      <div>
+        <input type="text" id="expShutter" placeholder="Shutter" inputmode="decimal" oninput="markCustom()">
+        <div class="input-hint">e.g. 1/120</div>
+      </div>
+      <div>
+        <input type="number" id="expBrightness" placeholder="Brightness" step="any" oninput="markCustom()">
+        <div class="input-hint">e.g. 7 (night: -3)</div>
+      </div>
+    </div>
+    <div class="input-row two">
+      <div>
+        <input type="number" id="expBias" placeholder="Exposure bias" step="any" oninput="markCustom()">
+        <div class="input-hint">Exposure bias &middot; e.g. 0</div>
+      </div>
+    </div>
+    <div class="input-hint" style="margin-top:10px">Any box left blank is filled in automatically to suit the date &amp; time above.</div>
+  </div>
+
+  <hr class="divider">
+
+  <div>
     <div class="section-label">Output Filename</div>
     <input type="text" id="outputFilename" placeholder="e.g. IMG_0472" maxlength="80">
     <div class="input-hint">No spaces or special chars &mdash; extension added automatically</div>
@@ -226,7 +263,7 @@
     <div class="progress-steps">
       <div class="step" id="step1">&#9679; Stripping original metadata</div>
       <div class="step" id="step2">&#9679; Writing iPhone EXIF tags</div>
-      <div class="step" id="step3">&#9679; Adding GPS & date info</div>
+      <div class="step" id="step3">&#9679; Adding GPS &amp; date info</div>
       <div class="step" id="step4">&#9679; Preparing download</div>
     </div>
   </div>
@@ -285,6 +322,33 @@
     document.getElementById('alt').value = alt;
   }
 
+  // ---- exposure presets ----
+  const EXPOSURE_PRESETS = {
+    daylight: { iso: 50,   shutter: '1/120', brightness: 7,   bias: 0 },
+    overcast: { iso: 100,  shutter: '1/100', brightness: 5.5, bias: 0 },
+    indoor:   { iso: 320,  shutter: '1/60',  brightness: 3,   bias: 0 },
+    lowlight: { iso: 800,  shutter: '1/30',  brightness: 0.5, bias: 0 },
+    night:    { iso: 2000, shutter: '1/15',  brightness: -3,  bias: 0 },
+  };
+
+  function applyExposurePreset() {
+    const key = document.getElementById('expPreset').value;
+    const p = EXPOSURE_PRESETS[key];
+    if (key === 'auto') {
+      // blank = server picks values to suit the date/time
+      ['expISO','expShutter','expBrightness','expBias'].forEach(id => document.getElementById(id).value = '');
+    } else if (p) {
+      document.getElementById('expISO').value = p.iso;
+      document.getElementById('expShutter').value = p.shutter;
+      document.getElementById('expBrightness').value = p.brightness;
+      document.getElementById('expBias').value = p.bias;
+    }
+  }
+
+  function markCustom() {
+    document.getElementById('expPreset').value = 'custom';
+  }
+
   const stepIds = ['step1','step2','step3','step4'];
   const stepPct = [25, 50, 75, 100];
   let stepTimer;
@@ -334,6 +398,10 @@
     form.append('lat', document.getElementById('lat').value);
     form.append('lon', document.getElementById('lon').value);
     form.append('alt', document.getElementById('alt').value);
+    form.append('iso', document.getElementById('expISO').value);
+    form.append('shutter', document.getElementById('expShutter').value);
+    form.append('brightness', document.getElementById('expBrightness').value);
+    form.append('bias', document.getElementById('expBias').value);
     form.append('filename', document.getElementById('outputFilename').value || 'tagged_image');
     const dateRaw = document.getElementById('recordDate').value;
     form.append('date', dateRaw ? dateRaw.replace('T',' ') : '');
