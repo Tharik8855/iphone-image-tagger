@@ -19,10 +19,10 @@ const upload = multer({
 app.use(express.static(path.join(__dirname, 'public')));
 
 const IPHONE_PROFILES = {
-  'iPhone 17 Pro':     { model: 'iPhone 17 Pro',     software: '18.4.1', lensMake: 'Apple', lensModel: 'iPhone 17 Pro back triple camera 6.765mm f/1.78' },
-  'iPhone 15 Pro':     { model: 'iPhone 15 Pro',     software: '17.4.1', lensMake: 'Apple', lensModel: 'iPhone 15 Pro back triple camera 6.765mm f/1.78' },
-  'iPhone 14 Pro':     { model: 'iPhone 14 Pro',     software: '17.4.1', lensMake: 'Apple', lensModel: 'iPhone 14 Pro back triple camera 6.86mm f/1.78' },
-  'iPhone 12 Pro Max': { model: 'iPhone 12 Pro Max', software: '16.7.2', lensMake: 'Apple', lensModel: 'iPhone 12 Pro Max back triple camera 5.1mm f/1.6' },
+  'iPhone 17 Pro':     { model: 'iPhone 17 Pro',     software: '18.4.1', lensMake: 'Apple', lensModel: 'iPhone 17 Pro back triple camera 6.765mm f/1.78',  lensInfo: '1.57 6 1.78 2.8' },
+  'iPhone 15 Pro':     { model: 'iPhone 15 Pro',     software: '17.4.1', lensMake: 'Apple', lensModel: 'iPhone 15 Pro back triple camera 6.765mm f/1.78',  lensInfo: '1.57 6 1.78 2.8' },
+  'iPhone 14 Pro':     { model: 'iPhone 14 Pro',     software: '17.4.1', lensMake: 'Apple', lensModel: 'iPhone 14 Pro back triple camera 6.86mm f/1.78',   lensInfo: '1.57 6 1.78 2.8' },
+  'iPhone 12 Pro Max': { model: 'iPhone 12 Pro Max', software: '16.7.2', lensMake: 'Apple', lensModel: 'iPhone 12 Pro Max back triple camera 5.1mm f/1.6',  lensInfo: '1.57 6 1.6 2.8'  },
 };
 
 const EXT_MAP = {
@@ -87,6 +87,53 @@ function autoExposure(hour) {
   return { iso: 50 + Math.floor(r * 50), brightness: 6 + r * 2, shutter: 1 / 120 };
 }
 
+// ---- timezone offset from GPS coordinates ----
+// Returns offset string like "+01:00" or "-05:00"
+// Uses a simple longitude-based approximation; accurate for Ireland/UK use
+function guessTimezoneOffset(lat, lon, dateObj) {
+  // Ireland/UK: lon roughly -11 to +2
+  // If GPS coords are in Ireland/UK range, apply DST logic
+  if (lat !== null && lon !== null) {
+    if (lon >= -11 && lon <= 2 && lat >= 50 && lat <= 60) {
+      // Ireland/UK: BST (summer) = +01:00, GMT (winter) = +00:00
+      // BST: last Sunday March to last Sunday October
+      const month = dateObj.getMonth() + 1; // 1-12
+      if (month > 3 && month < 10) return '+01:00';
+      if (month === 3) {
+        // last Sunday in March
+        const lastSunday = lastSundayOfMonth(dateObj.getFullYear(), 3);
+        return dateObj.getDate() >= lastSunday ? '+01:00' : '+00:00';
+      }
+      if (month === 10) {
+        // last Sunday in October
+        const lastSunday = lastSundayOfMonth(dateObj.getFullYear(), 10);
+        return dateObj.getDate() < lastSunday ? '+01:00' : '+00:00';
+      }
+      return '+00:00';
+    }
+    // Rough UTC offset from longitude for other locations
+    const rawOffset = Math.round(lon / 15);
+    const absH = Math.abs(rawOffset);
+    const sign = rawOffset >= 0 ? '+' : '-';
+    return `${sign}${String(absH).padStart(2, '0')}:00`;
+  }
+  // No GPS — default to +00:00
+  return '+00:00';
+}
+
+function lastSundayOfMonth(year, month) {
+  // month is 1-indexed; find last Sunday
+  const d = new Date(year, month, 0); // last day of month
+  d.setDate(d.getDate() - d.getDay()); // go back to Sunday
+  return d.getDate();
+}
+
+// ---- generate a unique OriginalDocumentID ----
+function generateDocumentID() {
+  const hex = () => Math.floor(Math.random() * 0xFFFFFFFF).toString(16).toUpperCase().padStart(8, '0');
+  return `xmp.did:${hex()}-${hex().slice(0,4)}-${hex().slice(0,4)}-${hex().slice(0,4)}-${hex().slice(0,12)}`;
+}
+
 app.post('/process', upload.single('image'), async (req, res) => {
   const inputPath = req.file?.path;
   if (!inputPath) return res.status(400).json({ error: 'No image uploaded.' });
@@ -114,14 +161,30 @@ app.post('/process', upload.single('image'), async (req, res) => {
     const dt = date ? new Date(date.replace(' ', 'T')) : new Date();
     const when = isNaN(dt.getTime()) ? new Date() : dt;
     const pad = n => String(n).padStart(2, '0');
-    const exifDate = `${when.getFullYear()}:${pad(when.getMonth()+1)}:${pad(when.getDate())} ${pad(when.getHours())}:${pad(when.getMinutes())}:${pad(when.getSeconds())}`;
-    const subSec = String(Math.floor(Math.random() * 999)).padStart(3, '0');
 
-    // Step 3: exposure - your values win, blanks fall back to auto
-    const auto = autoExposure(when.getHours());
+    // FIX: Sub-second aligned time — never land on a whole second.
+    // Generate a random sub-second value first, then offset seconds by it
+    // so DateTimeOriginal seconds match the SubSec value.
+    const subSecInt = Math.floor(Math.random() * 999);
+    const subSec = String(subSecInt).padStart(3, '0');
+    // Offset the second by a small random value (1–59s) so it's rarely :00
+    const secOffset = Math.floor(Math.random() * 59) + 1;
+    const adjustedTime = new Date(when.getTime() + secOffset * 1000);
+    const exifDate = `${adjustedTime.getFullYear()}:${pad(adjustedTime.getMonth()+1)}:${pad(adjustedTime.getDate())} ${pad(adjustedTime.getHours())}:${pad(adjustedTime.getMinutes())}:${pad(adjustedTime.getSeconds())}`;
+
+    // Step 3: timezone offset — match GPS location's civil time
+    const latN  = lat  ? parseFloat(lat)  : null;
+    const lonN  = lon  ? parseFloat(lon)  : null;
+    const tzOffset = guessTimezoneOffset(latN, lonN, adjustedTime);
+
+    // Step 4: exposure - your values win, blanks fall back to auto
+    const auto = autoExposure(adjustedTime.getHours());
     const iso = parseNum(req.body.iso) ?? auto.iso;
     const exposureTime = parseShutter(req.body.shutter) ?? auto.shutter;
-    const brightness = parseNum(req.body.brightness) ?? auto.brightness;
+    // FIX: BrightnessValue must be a decimal (not integer-like).
+    // Jitter by a small random decimal so it's never a whole number.
+    const rawBrightness = parseNum(req.body.brightness) ?? auto.brightness;
+    const brightness = parseFloat((rawBrightness + (Math.random() * 0.3 - 0.15)).toFixed(2));
     const bias = parseNum(req.body.bias) ?? 0;
 
     const tags = {
@@ -130,6 +193,8 @@ app.post('/process', upload.single('image'), async (req, res) => {
       Software: profile.software,
       LensMake: profile.lensMake,
       LensModel: profile.lensModel,
+      // FIX: LensInfo tag added (was missing)
+      LensInfo: profile.lensInfo,
       DateTimeOriginal: exifDate,
       CreateDate: exifDate,
       ModifyDate: exifDate,
@@ -137,9 +202,10 @@ app.post('/process', upload.single('image'), async (req, res) => {
       SubSecTime: subSec,
       SubSecTimeOriginal: subSec,
       SubSecTimeDigitized: subSec,
-      OffsetTime: '+00:00',
-      OffsetTimeOriginal: '+00:00',
-      OffsetTimeDigitized: '+00:00',
+      // FIX: timezone offset now reflects GPS location's civil time
+      OffsetTime: tzOffset,
+      OffsetTimeOriginal: tzOffset,
+      OffsetTimeDigitized: tzOffset,
       HostComputer: profile.model,
       FNumber: 1.78,
       ApertureValue: 1.78,
@@ -147,7 +213,8 @@ app.post('/process', upload.single('image'), async (req, res) => {
       ISO: Math.round(iso),
       ExposureTime: exposureTime,
       ShutterSpeedValue: exposureTime,
-      BrightnessValue: parseFloat(brightness.toFixed(4)),
+      // FIX: BrightnessValue is always a decimal
+      BrightnessValue: brightness,
       ExposureBiasValue: bias,
       ExifVersion: '0232',
       MeteringMode: 'Multi-segment',
@@ -162,9 +229,7 @@ app.post('/process', upload.single('image'), async (req, res) => {
       SceneType: 'Directly photographed',
     };
 
-    if (lat && lon) {
-      const latN = parseFloat(lat);
-      const lonN = parseFloat(lon);
+    if (latN !== null && lonN !== null) {
       const altN = parseFloat(alt) || 10;
       tags.GPSLatitude = Math.abs(latN);
       tags.GPSLatitudeRef = latN >= 0 ? 'N' : 'S';
@@ -178,7 +243,15 @@ app.post('/process', upload.single('image'), async (req, res) => {
       tags.GPSImgDirectionRef = 'T';
     }
 
-    await exiftool.write(workPath, tags, ['-XMP-x:XMPToolkit=', '-overwrite_original']);
+    // FIX: Unique OriginalDocumentID per image (no shared IDs across exports)
+    const docID = generateDocumentID();
+    const xmpTags = {
+      'XMP-xmpMM:OriginalDocumentID': docID,
+      'XMP-xmpMM:DocumentID': generateDocumentID(),
+      'XMP-xmpMM:InstanceID': `xmp.iid:${docID.slice(8)}`,
+    };
+
+    await exiftool.write(workPath, { ...tags, ...xmpTags }, ['-XMP-x:XMPToolkit=', '-overwrite_original']);
 
     res.setHeader('Content-Disposition', `attachment; filename="${outputName}"`);
     res.setHeader('Content-Type', fmt.mime);
