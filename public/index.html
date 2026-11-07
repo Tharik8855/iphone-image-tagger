@@ -165,14 +165,26 @@
   <hr class="divider">
 
   <div>
+    <div class="section-label">Image Pixels</div>
+    <label style="display:flex;align-items:center;gap:10px;font-size:15px;cursor:pointer">
+      <input type="checkbox" id="keepPixels" checked onchange="onKeepPixels()" style="width:22px;height:22px">
+      Keep original pixels (only change metadata)
+    </label>
+    <div class="input-hint" id="keepPixelsHint">Your photo's image data stays exactly the same. The file comes back in the same format you uploaded.</div>
+  </div>
+
+  <hr class="divider">
+
+  <div>
     <div class="section-label">Output Format</div>
-    <select id="outputFormat">
+    <select id="outputFormat" disabled>
       <option value="heic">HEIF (.heic) &mdash; native iPhone format</option>
       <option value="jpeg">JPEG (.jpg) &mdash; most compatible</option>
       <option value="png">PNG (.png) &mdash; lossless</option>
       <option value="webp">WebP (.webp) &mdash; web optimised</option>
       <option value="tiff">TIFF (.tiff) &mdash; high quality</option>
     </select>
+    <div class="input-hint" id="formatHint">Same as your photo (Keep original pixels is on)</div>
   </div>
 
   <hr class="divider">
@@ -321,6 +333,15 @@
     }
   }
 
+  // ---- keep original pixels switch ----
+  function onKeepPixels() {
+    const on = document.getElementById('keepPixels').checked;
+    document.getElementById('outputFormat').disabled = on;
+    document.getElementById('formatHint').textContent = on
+      ? 'Same as your photo (Keep original pixels is on)'
+      : 'Photo is re-saved: resized to the model\'s size, P3 colours, built-in preview';
+  }
+
   // ---- US location picker ----
   const stateSel = document.getElementById('usState');
   const citySel = document.getElementById('usCity');
@@ -448,6 +469,7 @@
     form.append('image', file);
     form.append('model', document.getElementById('iphoneModel').value);
     form.append('format', format);
+    form.append('keepPixels', document.getElementById('keepPixels').checked ? '1' : '0');
     form.append('lat', document.getElementById('lat').value);
     form.append('lon', document.getElementById('lon').value);
     form.append('alt', document.getElementById('alt').value);
@@ -472,7 +494,10 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = (document.getElementById('outputFilename').value || 'tagged_image').replace(/[^a-zA-Z0-9_\-]/g,'_') + ext;
+      // Use the server's file name (its extension matches the real format)
+      const cd = res.headers.get('Content-Disposition') || '';
+      const m = /filename="([^"]+)"/.exec(cd);
+      a.download = m ? m[1] : (document.getElementById('outputFilename').value || 'tagged_image').replace(/[^a-zA-Z0-9_\-]/g,'_') + ext;
       document.body.appendChild(a);
       a.click();
       a.remove();

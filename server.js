@@ -97,6 +97,8 @@ function iosFor(wallMs, profile) {
   return pick;
 }
 
+const FORMAT_FOR_TYPE = { JPEG: 'jpeg', HEIC: 'heic', HEIF: 'heic', PNG: 'png', WEBP: 'webp', TIFF: 'tiff' };
+
 const EXT_MAP = {
   'heic': { ext: '.heic', mime: 'image/heic' },
   'jpeg': { ext: '.jpg',  mime: 'image/jpeg' },
@@ -351,7 +353,20 @@ app.post('/process', upload.single('image'), async (req, res) => {
     return res.status(400).json({ error: 'Invalid iPhone model.' });
   }
 
-  const formatKey = EXT_MAP[format] ? format : 'jpeg';
+  // Keep original pixels (default): only the metadata changes, the image data is untouched.
+  // The output is then always the same format as the uploaded photo.
+  const keepPixels = req.body.keepPixels !== '0';
+  let formatKey = EXT_MAP[format] ? format : 'jpeg';
+  let srcInfo = null;
+  if (keepPixels) {
+    srcInfo = await exiftool.read(inputPath).catch(() => ({}));
+    const sameFormat = FORMAT_FOR_TYPE[String(srcInfo.FileType || '').toUpperCase()];
+    if (!sameFormat) {
+      cleanup(inputPath);
+      return res.status(400).json({ error: 'Keep original pixels works with HEIC, JPG, PNG, WebP and TIFF photos.' });
+    }
+    formatKey = sameFormat;
+  }
   const fmt = EXT_MAP[formatKey];
   const workPath = tmpFile(fmt.ext);
   const outputName = (filename || 'output').replace(/[^a-zA-Z0-9_\-]/g, '_') + fmt.ext;
@@ -379,7 +394,14 @@ app.post('/process', upload.single('image'), async (req, res) => {
     const tzOffset = fmtOffset(offMin);
     const software = iosFor(wall.getTime(), profile);
 
-    const { orientation } = await convertImage(inputPath, workPath, formatKey, profile.maxLong);
+    let orientation;
+    if (keepPixels) {
+      // Exact copy of the photo; keep its own rotation tag so it still shows the right way up
+      fs.copyFileSync(inputPath, workPath);
+      orientation = Number(srcInfo.Orientation) || 1;
+    } else {
+      ({ orientation } = await convertImage(inputPath, workPath, formatKey, profile.maxLong));
+    }
 
     // Strip all metadata incl. XMP, but keep the colour profile
     await exiftool.write(workPath, {}, ['-all=', '--ICC_Profile:all', '-overwrite_original']);
@@ -414,7 +436,7 @@ app.post('/process', upload.single('image'), async (req, res) => {
     const tags = {
       Make: 'Apple',
       Model: profile.model,
-      Orientation: orientation === 6 ? 'Rotate 90 CW' : 'Horizontal (normal)',
+      'Orientation#': orientation,
       Software: software,
       HostComputer: profile.model,
       LensMake: 'Apple',
