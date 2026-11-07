@@ -235,7 +235,7 @@
       </div>
       <div>
         <input type="number" id="expBrightness" placeholder="Brightness" step="any" oninput="markCustom()">
-        <div class="input-hint">e.g. 7 (night: -3)</div>
+        <div class="input-hint">e.g. 7.2318 (night: -3.17)</div>
       </div>
     </div>
     <div class="input-row two">
@@ -324,13 +324,17 @@
   }
 
   // ---- exposure presets ----
+  // Each preset is a range; picking one fills in a fresh random value inside it,
+  // so Brightness always has decimals and ISO isn't a round number every time.
   const EXPOSURE_PRESETS = {
-    daylight: { iso: 50,   shutter: '1/120', brightness: 7,   bias: 0 },
-    overcast: { iso: 100,  shutter: '1/100', brightness: 5.5, bias: 0 },
-    indoor:   { iso: 320,  shutter: '1/60',  brightness: 3,   bias: 0 },
-    lowlight: { iso: 800,  shutter: '1/30',  brightness: 0.5, bias: 0 },
-    night:    { iso: 2000, shutter: '1/15',  brightness: -3,  bias: 0 },
+    daylight: { iso: [40, 64],     shutter: '1/120', brightness: [6.6, 7.9] },
+    overcast: { iso: [80, 125],    shutter: '1/100', brightness: [5.0, 6.0] },
+    indoor:   { iso: [250, 400],   shutter: '1/60',  brightness: [2.4, 3.6] },
+    lowlight: { iso: [640, 1000],  shutter: '1/30',  brightness: [0.1, 1.0] },
+    night:    { iso: [1600, 2500], shutter: '1/15',  brightness: [-3.6, -2.4] },
   };
+
+  function between([lo, hi]) { return lo + Math.random() * (hi - lo); }
 
   function applyExposurePreset() {
     const key = document.getElementById('expPreset').value;
@@ -339,10 +343,13 @@
       // blank = server picks values to suit the date/time
       ['expISO','expShutter','expBrightness','expBias'].forEach(id => document.getElementById(id).value = '');
     } else if (p) {
-      document.getElementById('expISO').value = p.iso;
+      let b = between(p.brightness);
+      // never a whole number (e.g. -3.0000)
+      if (Math.abs(b - Math.round(b)) < 0.01) b += 0.0371;
+      document.getElementById('expISO').value = Math.round(between(p.iso));
       document.getElementById('expShutter').value = p.shutter;
-      document.getElementById('expBrightness').value = p.brightness;
-      document.getElementById('expBias').value = p.bias;
+      document.getElementById('expBrightness').value = b.toFixed(4);
+      document.getElementById('expBias').value = 0;
     }
   }
 
