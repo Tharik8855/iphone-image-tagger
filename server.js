@@ -33,7 +33,6 @@ const EXT_MAP = {
   'tiff': { ext: '.tiff', mime: 'image/tiff' },
 };
 
-// Real file type of the upload (ignores the filename), e.g. 'PNG', 'JPEG', 'HEIC'
 async function detectType(file) {
   const t = await exiftool.read(file, ['-FileType']);
   return String(t.FileType || '').toUpperCase();
@@ -41,14 +40,12 @@ async function detectType(file) {
 
 const TYPE_FOR_FORMAT = { heic: 'HEIC', jpeg: 'JPEG', png: 'PNG', webp: 'WEBP', tiff: 'TIFF' };
 
-// Convert the upload into the requested format (skipped if it already matches).
 async function convertImage(src, dest, format) {
   const actual = await detectType(src);
   if (actual === TYPE_FOR_FORMAT[format] || (format === 'heic' && actual === 'HEIF')) {
     fs.copyFileSync(src, dest);
     return;
   }
-  // [0] = first frame only; -auto-orient bakes rotation in before EXIF is wiped
   await execFileAsync('convert', [`${src}[0]`, '-auto-orient', '-quality', '95', dest]);
 }
 
@@ -56,6 +53,38 @@ function cleanup(...files) {
   for (const f of files) {
     try { if (f && fs.existsSync(f)) fs.unlinkSync(f); } catch {}
   }
+}
+
+// ---- exposure helpers ----
+function parseNum(v) {
+  if (v === undefined || v === null || String(v).trim() === '') return null;
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+// "1/120", "0.5", "2" -> seconds, or null
+function parseShutter(v) {
+  if (v === undefined || v === null) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  if (s.includes('/')) {
+    const [a, b] = s.split('/').map(parseFloat);
+    if (Number.isFinite(a) && Number.isFinite(b) && b !== 0 && a > 0) return a / b;
+    return null;
+  }
+  const n = parseFloat(s);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// Time-of-day defaults for any exposure field left blank
+function autoExposure(hour) {
+  const r = Math.random();
+  if (hour >= 20 || hour < 6) {
+    return { iso: 1600 + Math.floor(r * 1600), brightness: -(2 + r * 2), shutter: 1 / 15 };
+  } else if (hour < 9 || hour >= 17) {
+    return { iso: 100 + Math.floor(r * 300), brightness: 3.5 + r * 1.5, shutter: 1 / 60 };
+  }
+  return { iso: 50 + Math.floor(r * 50), brightness: 6 + r * 2, shutter: 1 / 120 };
 }
 
 app.post('/process', upload.single('image'), async (req, res) => {
@@ -75,21 +104,26 @@ app.post('/process', upload.single('image'), async (req, res) => {
   const outputName = (filename || 'output').replace(/[^a-zA-Z0-9_\-]/g, '_') + fmt.ext;
 
   try {
-    // Convert to the chosen format first (no-op if the upload already matches)
     const formatKey = EXT_MAP[format] ? format : 'jpeg';
     await convertImage(inputPath, workPath, formatKey);
 
-    // Step 1: Strip ALL existing metadata (simple -all= only, no tagsfromfile)
-    await exiftool.write(workPath, {}, ['-all=', '-overwrite_original']);
+    // Step 1: strip ALL metadata incl. XMP
+    await exiftool.write(workPath, {}, ['-all=', '-XMP:all=', '-overwrite_original']);
 
-    // Step 2: Build date string in EXIF format YYYY:MM:DD HH:MM:SS
-    const exifDate = (() => {
-      const d = date ? new Date(date.replace(' ', 'T')) : new Date();
-      const pad = n => String(n).padStart(2, '0');
-      return `${d.getFullYear()}:${pad(d.getMonth()+1)}:${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-    })();
+    // Step 2: dates
+    const dt = date ? new Date(date.replace(' ', 'T')) : new Date();
+    const when = isNaN(dt.getTime()) ? new Date() : dt;
+    const pad = n => String(n).padStart(2, '0');
+    const exifDate = `${when.getFullYear()}:${pad(when.getMonth()+1)}:${pad(when.getDate())} ${pad(when.getHours())}:${pad(when.getMinutes())}:${pad(when.getSeconds())}`;
+    const subSec = String(Math.floor(Math.random() * 999)).padStart(3, '0');
 
-    // Step 3: Write fresh iPhone EXIF tags
+    // Step 3: exposure - your values win, blanks fall back to auto
+    const auto = autoExposure(when.getHours());
+    const iso = parseNum(req.body.iso) ?? auto.iso;
+    const exposureTime = parseShutter(req.body.shutter) ?? auto.shutter;
+    const brightness = parseNum(req.body.brightness) ?? auto.brightness;
+    const bias = parseNum(req.body.bias) ?? 0;
+
     const tags = {
       Make: 'Apple',
       Model: profile.model,
@@ -100,22 +134,32 @@ app.post('/process', upload.single('image'), async (req, res) => {
       CreateDate: exifDate,
       ModifyDate: exifDate,
       DateTimeDigitized: exifDate,
+      SubSecTime: subSec,
+      SubSecTimeOriginal: subSec,
+      SubSecTimeDigitized: subSec,
+      OffsetTime: '+00:00',
+      OffsetTimeOriginal: '+00:00',
+      OffsetTimeDigitized: '+00:00',
       HostComputer: profile.model,
       FNumber: 1.78,
-      ExposureProgram: 'Program AE',
-      ISO: 50,
-      ExifVersion: '0232',
-      ShutterSpeedValue: '1/120',
       ApertureValue: 1.78,
-      BrightnessValue: 7,
-      ExposureBiasValue: 0,
+      ExposureProgram: 'Program AE',
+      ISO: Math.round(iso),
+      ExposureTime: exposureTime,
+      ShutterSpeedValue: exposureTime,
+      BrightnessValue: parseFloat(brightness.toFixed(4)),
+      ExposureBiasValue: bias,
+      ExifVersion: '0232',
       MeteringMode: 'Multi-segment',
       Flash: 'Off, Did not fire',
       FocalLength: '6.8 mm',
-      ColorSpace: 1,
+      ColorSpace: 65535,
       FocalLengthIn35mmFormat: '26 mm',
       SceneCaptureType: 'Standard',
       WhiteBalance: 'Auto',
+      ExposureMode: 'Auto',
+      SensingMethod: 'One-chip color area',
+      SceneType: 'Directly photographed',
     };
 
     if (lat && lon) {
@@ -128,9 +172,13 @@ app.post('/process', upload.single('image'), async (req, res) => {
       tags.GPSLongitudeRef = lonN >= 0 ? 'E' : 'W';
       tags.GPSAltitude = altN;
       tags.GPSAltitudeRef = 0;
+      tags.GPSSpeed = parseFloat((Math.random() * 1.5).toFixed(2));
+      tags.GPSSpeedRef = 'K';
+      tags.GPSImgDirection = parseFloat((Math.random() * 360).toFixed(2));
+      tags.GPSImgDirectionRef = 'T';
     }
 
-    await exiftool.write(workPath, tags, ['-overwrite_original']);
+    await exiftool.write(workPath, tags, ['-XMP-x:XMPToolkit=', '-overwrite_original']);
 
     res.setHeader('Content-Disposition', `attachment; filename="${outputName}"`);
     res.setHeader('Content-Type', fmt.mime);
