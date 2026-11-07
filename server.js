@@ -111,11 +111,24 @@ function tmpFile(ext) {
 
 let heifEncAvailable = null;
 async function hasHeifEnc() {
+  if (process.env.DISABLE_HEIF_ENC) return false;
   if (heifEncAvailable === null) {
     try { await execFileAsync('heif-enc', ['--version']); heifEncAvailable = true; }
     catch (e) { heifEncAvailable = !!(e && e.code !== 'ENOENT' && e.code !== 127); }
   }
   return heifEncAvailable;
+}
+
+// ImageMagick needs LittleCMS (lcms) to convert colours properly
+let lcmsAvailable = null;
+async function hasLcms() {
+  if (lcmsAvailable === null) {
+    try {
+      const { stdout } = await execFileAsync('convert', ['-version']);
+      lcmsAvailable = /\blcms\b/i.test(stdout);
+    } catch { lcmsAvailable = false; }
+  }
+  return lcmsAvailable;
 }
 
 // Turns the photo upright, shrinks it to the model's photo size, converts colours
@@ -139,8 +152,12 @@ async function convertImage(src, dest, format, maxLong) {
   }
 
   const base = [`${input}[0]`, '-auto-orient', '-resize', `${maxLong}x${maxLong}>`];
-  // No profile = treat as sRGB; then convert to Display P3
-  const colour = hasIcc ? ['-profile', P3_ICC] : ['-profile', SRGB_ICC, '-profile', P3_ICC];
+  // No profile = treat as sRGB; then convert to Display P3.
+  // Without lcms the colours can't be converted, so leave them as they are.
+  let colour = [];
+  if (await hasLcms()) {
+    colour = hasIcc ? ['-profile', P3_ICC] : ['-profile', SRGB_ICC, '-profile', P3_ICC];
+  }
 
   let orientation = 1;
   const tmpPng = tmpFile('.png');
@@ -154,10 +171,19 @@ async function convertImage(src, dest, format, maxLong) {
       if (portrait) { args.push('-rotate', '-90'); orientation = 6; }
       args.push('-sampling-factor', '4:2:0', '-quality', '92', dest);
       await execFileAsync('convert', args);
-    } else if (format === 'heic' && await hasHeifEnc()) {
-      // heif-enc gives 8-bit HEIC with a built-in preview image, like an iPhone
+    } else if (format === 'heic') {
       await execFileAsync('convert', [...base, ...colour, '-depth', '8', tmpPng]);
-      await execFileAsync('heif-enc', ['-q', '90', '-t', '320', '-o', dest, tmpPng]);
+      if (await hasHeifEnc()) {
+        // heif-enc gives 8-bit HEIC with a built-in preview image, like an iPhone
+        await execFileAsync('heif-enc', ['-q', '90', '-t', '320', '-o', dest, tmpPng]);
+      } else {
+        await execFileAsync('convert', [tmpPng, '-quality', '90', dest]);
+      }
+      // Some HEIC encoders drop the colour profile; copy it back from the PNG
+      const chk = await exiftool.read(dest);
+      if (!chk.ProfileDescription) {
+        await exiftool.write(dest, {}, ['-tagsFromFile', tmpPng, '-ICC_Profile', '-overwrite_original']);
+      }
     } else {
       await execFileAsync('convert', [...base, ...colour, '-depth', '8', '-quality', '95', dest]);
     }
@@ -258,6 +284,17 @@ function validCoord(v, limit) {
   const n = parseFloat(v);
   return Number.isFinite(n) && Math.abs(n) <= limit ? n : null;
 }
+
+// Open /diag on your phone to see what the server has installed
+app.get('/diag', async (req, res) => {
+  const out = { node: process.version, docker: fs.existsSync('/.dockerenv') };
+  try { out.imagemagick = (await execFileAsync('convert', ['-version'])).stdout.split('\n').slice(0, 4).join(' | '); }
+  catch (e) { out.imagemagick = 'missing: ' + e.message; }
+  out.lcms = await hasLcms();
+  out.heifEnc = await hasHeifEnc();
+  try { out.exiftool = await exiftool.version(); } catch { out.exiftool = 'error'; }
+  res.json(out);
+});
 
 app.post('/process', upload.single('image'), async (req, res) => {
   const inputPath = req.file?.path;
