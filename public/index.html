@@ -178,15 +178,17 @@
   <hr class="divider">
 
   <div>
-    <div class="gps-label">
-      <span class="section-label" style="margin:0">GPS Coordinates <span style="color:#333;font-weight:400">(optional)</span></span>
-      <div class="gps-presets">
-        <button class="preset-btn" onclick="setGPS(40.7128,-74.0060,10)">New York</button>
-        <button class="preset-btn" onclick="setGPS(40.6950,-73.9857,8)">Brooklyn</button>
-        <button class="preset-btn" onclick="setGPS(34.0522,-118.2437,71)">LA</button>
-        <button class="preset-btn" onclick="setGPS(51.5074,-0.1278,11)">London</button>
-      </div>
+    <div class="section-label">Location <span style="color:#333;font-weight:400">(optional)</span></div>
+    <div class="input-row two" style="margin-top:0">
+      <select id="usState" onchange="onStateChange()">
+        <option value="">Manual (type below)</option>
+        <option value="ANY">Random US state</option>
+      </select>
+      <select id="usCity" onchange="pickSpot()" disabled>
+        <option value="">Random city</option>
+      </select>
     </div>
+    <button class="preset-btn" id="newSpotBtn" style="margin:10px 0 12px;display:none" onclick="pickSpot()">&#127922; New random spot</button>
     <div class="input-row three">
       <div>
         <input type="number" id="lat" placeholder="Latitude" step="any" min="-90" max="90">
@@ -201,6 +203,7 @@
         <div class="input-hint">e.g. 10</div>
       </div>
     </div>
+    <div class="input-hint" id="spotInfo" style="margin-top:8px"></div>
   </div>
 
   <hr class="divider">
@@ -275,6 +278,7 @@
 
 </div>
 
+<script src="us-places.js"></script>
 <script>
   const dropZone = document.getElementById('dropZone');
   const fileInput = document.getElementById('imageFile');
@@ -317,10 +321,51 @@
     }
   }
 
-  function setGPS(lat, lon, alt) {
-    document.getElementById('lat').value = lat;
-    document.getElementById('lon').value = lon;
-    document.getElementById('alt').value = alt;
+  // ---- US location picker ----
+  const stateSel = document.getElementById('usState');
+  const citySel = document.getElementById('usCity');
+  Object.entries(US_PLACES)
+    .sort((a, b) => a[1].name.localeCompare(b[1].name))
+    .forEach(([code, st]) => stateSel.add(new Option(st.name, code)));
+
+  function onStateChange() {
+    const code = stateSel.value;
+    citySel.length = 1; // keep "Random city"
+    citySel.disabled = !code || code === 'ANY';
+    if (code && code !== 'ANY') {
+      US_PLACES[code].cities.forEach((c, i) => citySel.add(new Option(c[0], i)));
+    }
+    document.getElementById('newSpotBtn').style.display = code ? 'inline-block' : 'none';
+    if (code) pickSpot();
+    else document.getElementById('spotInfo').textContent = '';
+  }
+
+  // Random point up to `radius` metres from a place (spread evenly over the circle)
+  function nearby(lat, lon, radius) {
+    const r = radius * Math.sqrt(Math.random());
+    const a = Math.random() * 2 * Math.PI;
+    const dLat = (r * Math.cos(a)) / 111320;
+    const dLon = (r * Math.sin(a)) / (111320 * Math.cos(lat * Math.PI / 180));
+    return [lat + dLat, lon + dLon];
+  }
+
+  function pickSpot() {
+    let code = stateSel.value;
+    if (!code) return;
+    if (code === 'ANY') {
+      const codes = Object.keys(US_PLACES);
+      code = codes[Math.floor(Math.random() * codes.length)];
+    }
+    const st = US_PLACES[code];
+    const idx = (stateSel.value !== 'ANY' && citySel.value !== '')
+      ? Number(citySel.value)
+      : Math.floor(Math.random() * st.cities.length);
+    const [name, lat, lon, alt] = st.cities[idx];
+    const [rlat, rlon] = nearby(lat, lon, 500);
+    document.getElementById('lat').value = rlat.toFixed(6);
+    document.getElementById('lon').value = rlon.toFixed(6);
+    document.getElementById('alt').value = (alt + (Math.random() * 8 - 4)).toFixed(3);
+    document.getElementById('spotInfo').textContent = 'Spot: ' + name + ', ' + st.name;
   }
 
   // ---- exposure presets ----

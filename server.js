@@ -333,7 +333,6 @@ app.post('/process', upload.single('image'), async (req, res) => {
 
     const offMin = wallOffset(tz, wall.getTime());
     const tzOffset = fmtOffset(offMin);
-    const utc = new Date(wall.getTime() - offMin * 60000);
     const software = iosFor(wall.getTime(), profile);
 
     const { orientation } = await convertImage(inputPath, workPath, formatKey, profile.maxLong);
@@ -416,19 +415,29 @@ app.post('/process', upload.single('image'), async (req, res) => {
     if (subjectArea) tags['SubjectArea'] = subjectArea;
 
     if (hasGPS) {
-      const altN = parseFloat(alt);
-      tags.GPSLatitude = Math.abs(latN);
-      tags.GPSLatitudeRef = latN >= 0 ? 'N' : 'S';
-      tags.GPSLongitude = Math.abs(lonN);
-      tags.GPSLongitudeRef = lonN >= 0 ? 'E' : 'W';
-      tags.GPSAltitude = Math.abs(Number.isFinite(altN) ? altN : 10);
-      tags.GPSAltitudeRef = Number.isFinite(altN) && altN < 0 ? 1 : 0;
-      tags.GPSSpeed = parseFloat((Math.random() * 1.5).toFixed(2));
+      // Move a few metres (3–20 m) from the entered point, like real GPS readings
+      const dist = 3 + Math.random() * 17;
+      const ang = Math.random() * 2 * Math.PI;
+      const gLat = latN + (dist * Math.cos(ang)) / 111320;
+      const gLon = lonN + (dist * Math.sin(ang)) / (111320 * Math.cos(latN * Math.PI / 180));
+      // Altitude always has decimals
+      const altIn = parseFloat(alt);
+      const altN = parseFloat(((Number.isFinite(altIn) ? altIn : 10) + (Math.random() * 3 - 1.5)).toFixed(3));
+      const heading = parseFloat((Math.random() * 360).toFixed(4));
+
+      tags.GPSLatitude = Math.abs(gLat);
+      tags.GPSLatitudeRef = gLat >= 0 ? 'N' : 'S';
+      tags.GPSLongitude = Math.abs(gLon);
+      tags.GPSLongitudeRef = gLon >= 0 ? 'E' : 'W';
+      tags.GPSAltitude = Math.abs(altN);
+      tags.GPSAltitudeRef = altN < 0 ? 1 : 0;
+      tags.GPSSpeed = parseFloat((Math.random() * 1.2).toFixed(4));
       tags.GPSSpeedRef = 'K';
-      tags.GPSImgDirection = parseFloat((Math.random() * 360).toFixed(2));
+      tags.GPSImgDirection = heading;
       tags.GPSImgDirectionRef = 'T';
-      tags.GPSDateStamp = `${utc.getUTCFullYear()}:${pad(utc.getUTCMonth() + 1)}:${pad(utc.getUTCDate())}`;
-      tags.GPSTimeStamp = `${pad(utc.getUTCHours())}:${pad(utc.getUTCMinutes())}:${pad(utc.getUTCSeconds())}`;
+      tags.GPSDestBearing = heading;
+      tags.GPSDestBearingRef = 'T';
+      tags.GPSHPositioningError = parseFloat((3.5 + Math.random() * 11).toFixed(4));
     }
 
     const extraArgs = ['-XMP-x:XMPToolkit=', '-overwrite_original'];
