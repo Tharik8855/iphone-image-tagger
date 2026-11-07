@@ -272,7 +272,7 @@ app.post('/process', upload.single('image'), async (req, res) => {
       ExposureBiasValue: bias,
       ExifVersion: '0232',
       MeteringMode: 'Multi-segment',
-      Flash: 'Off, Did not fire',
+      'EXIF:Flash#': 16, // Off, Did not fire (number avoids the comma being split)
       ColorSpace: isP3 ? 'Uncalibrated' : 'sRGB',
       SceneCaptureType: 'Standard',
       WhiteBalance: 'Auto',
