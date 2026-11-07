@@ -175,15 +175,12 @@ async function convertImage(src, dest, format, maxLong) {
       await execFileAsync('convert', [...base, ...colour, '-depth', '8', tmpPng]);
       if (await hasHeifEnc()) {
         // heif-enc gives 8-bit HEIC with a built-in preview image, like an iPhone
-        await execFileAsync('heif-enc', ['-q', '90', '-t', '320', '-o', dest, tmpPng]);
+        await execFileAsync('heif-enc', await heifEncArgs(tmpPng, dest));
       } else {
         await execFileAsync('convert', [tmpPng, '-quality', '90', dest]);
       }
-      // Some HEIC encoders drop the colour profile; copy it back from the PNG
-      const chk = await exiftool.read(dest);
-      if (!chk.ProfileDescription) {
-        await exiftool.write(dest, {}, ['-tagsFromFile', tmpPng, '-ICC_Profile', '-overwrite_original']);
-      }
+      // Some HEIC encoders (e.g. older ImageMagick) drop the colour profile; put it back
+      await ensureIcc(dest, tmpPng, colour.length > 0);
     } else {
       await execFileAsync('convert', [...base, ...colour, '-depth', '8', '-quality', '95', dest]);
     }
@@ -191,6 +188,31 @@ async function convertImage(src, dest, format, maxLong) {
     cleanup(tmpInput, tmpPng);
   }
   return { orientation };
+}
+
+// heif-enc settings; the built-in preview must be smaller than the photo
+async function heifEncArgs(pngPath, dest) {
+  const d = await exiftool.read(pngPath);
+  const longSide = Math.max(Number(d.ImageWidth) || 0, Number(d.ImageHeight) || 0);
+  const args = ['-q', '90'];
+  if (longSide > 320) args.push('-t', '320');
+  return [...args, '-o', dest, pngPath];
+}
+
+// Makes sure an encoded file carries the colour profile its pixels are in
+async function ensureIcc(file, pngWithProfile, convertedToP3) {
+  const has = async () => !!(await exiftool.read(file)).ProfileDescription;
+  if (await has()) return 'kept';
+  try {
+    await exiftool.write(file, {}, ['-tagsFromFile', pngWithProfile, '-ICC_Profile', '-overwrite_original']);
+    if (await has()) return 'copied from png';
+  } catch (e) { console.error('ICC copy failed:', e.message); }
+  const icc = convertedToP3 ? P3_ICC : SRGB_ICC;
+  try {
+    await exiftool.write(file, {}, [`-ICC_Profile<=${icc}`, '-overwrite_original']);
+    if (await has()) return 'written from file';
+  } catch (e) { console.error('ICC write failed:', e.message); }
+  return 'missing';
 }
 
 // Small 160x120-style preview stored inside JPEG EXIF (iPhones include one)
@@ -293,6 +315,28 @@ app.get('/diag', async (req, res) => {
   out.lcms = await hasLcms();
   out.heifEnc = await hasHeifEnc();
   try { out.exiftool = await exiftool.version(); } catch { out.exiftool = 'error'; }
+
+  // Self-test: run a small test image through the HEIC steps and report the colour profile
+  const t = {};
+  const src = tmpFile('.png'), png = tmpFile('.png'), heic = tmpFile('.heic');
+  try {
+    await execFileAsync('convert', ['-size', '120x160', 'gradient:red-blue', src]);
+    const colour = out.lcms ? ['-profile', SRGB_ICC, '-profile', P3_ICC] : [];
+    await execFileAsync('convert', [src, ...colour, '-depth', '8', png]);
+    t.pngProfile = (await exiftool.read(png)).ProfileDescription || 'none';
+    if (out.heifEnc) await execFileAsync('heif-enc', await heifEncArgs(png, heic));
+    else await execFileAsync('convert', [png, '-quality', '90', heic]);
+    t.encoder = out.heifEnc ? 'heif-enc' : 'imagemagick';
+    t.afterEncode = (await exiftool.read(heic)).ProfileDescription || 'none';
+    t.fix = await ensureIcc(heic, png, colour.length > 0);
+    await exiftool.write(heic, {}, ['-all=', '--ICC_Profile:all', '-overwrite_original']);
+    t.afterStrip = (await exiftool.read(heic)).ProfileDescription || 'none';
+  } catch (e) {
+    t.error = e.message;
+  } finally {
+    cleanup(src, png, heic);
+  }
+  out.heicTest = t;
   res.json(out);
 });
 
