@@ -27,7 +27,15 @@
     text-align: center;
     margin-bottom: 8px;
   }
-  .subtitle { color: #666; font-size: 14px; margin-bottom: 48px; text-align: center; }
+  .subtitle { color: #666; font-size: 14px; margin-bottom: 28px; text-align: center; }
+  .tabs { display: flex; gap: 8px; width: 100%; max-width: 540px; margin-bottom: 16px; }
+  .tab {
+    flex: 1; padding: 14px; border-radius: 12px; border: 1px solid #232336;
+    background: #12121a; color: #888; font-size: 16px; font-weight: 600; cursor: pointer;
+  }
+  .tab.on { background: linear-gradient(135deg, #5a64ef, #7e45e8); color: #fff; border-color: transparent; }
+  body:not(.batch) .batch-only { display: none !important; }
+  body.batch .single-only { display: none !important; }
   .card {
     background: #12121a;
     border: 1px solid #1e1e2e;
@@ -74,7 +82,7 @@
   select:focus { outline: none; border-color: #6e78ff; }
   .input-row.three { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
   .input-row.two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
-  input[type="text"], input[type="number"], input[type="datetime-local"] {
+  input[type="text"], input[type="number"], input[type="datetime-local"], input[type="date"] {
     width: 100%;
     padding: 12px 14px;
     background: #0d0d16;
@@ -113,6 +121,11 @@
   }
   .submit-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(110,80,232,0.4); }
   .submit-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .second-btn {
+    padding: 14px; border-radius: 12px; border: 1px solid #2e2e48; background: #161624;
+    color: #b8bcff; font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  .second-btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .progress-wrap { display: none; flex-direction: column; gap: 10px; }
   .progress-wrap.show { display: flex; }
   .progress-bar-bg { height: 4px; background: #1a1a28; border-radius: 4px; overflow: hidden; }
@@ -126,6 +139,23 @@
   .success-box { background: rgba(76,175,128,0.1); border: 1px solid rgba(76,175,128,0.25); border-radius: 10px; padding: 14px 16px; font-size: 13px; color: #4caf80; display: none; text-align: center; }
   .success-box.show { display: block; }
   .divider { border: none; border-top: 1px solid #1a1a28; }
+
+  /* ---- batch ---- */
+  .batch-status { font-size: 15px; color: #9099ff; margin-top: 10px; min-height: 1em; }
+  .batch-sun { font-size: 13px; color: #888; margin-bottom: 10px; }
+  .batch-list { display: flex; flex-direction: column; gap: 12px; }
+  .row { display: flex; gap: 12px; background: #0d0d16; border: 1px solid #1e1e2e; border-radius: 12px; padding: 10px; }
+  .thumb { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; background: #1a1a28; flex-shrink: 0; }
+  .row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+  .row-name { font-size: 12px; color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row-main select { padding: 9px 12px; font-size: 15px; }
+  .row-plan { font-size: 14px; color: #e8e8f0; line-height: 1.4; }
+  .row-note { font-size: 12px; color: #777; }
+  .row-err { font-size: 13px; color: #ff8080; }
+  .row-done a { color: #4caf80; font-size: 15px; font-weight: 600; text-decoration: none; }
+  .check { display: flex; align-items: center; gap: 10px; font-size: 15px; cursor: pointer; }
+  .check input { width: 22px; height: 22px; flex-shrink: 0; }
+  .btn-row { display: flex; flex-direction: column; gap: 10px; }
 </style>
 </head>
 <body>
@@ -134,9 +164,15 @@
 <h1>iPhone Image Tagger</h1>
 <p class="subtitle">Strip &amp; replace image metadata to match any iPhone model</p>
 
+<div class="tabs">
+  <button class="tab on" id="tabSingle" onclick="setMode(false)">One photo</button>
+  <button class="tab" id="tabBatch" onclick="setMode(true)">Batch</button>
+</div>
+
 <div class="card">
 
-  <div>
+  <!-- ===== single photo ===== -->
+  <div class="single-only">
     <div class="section-label">Image File</div>
     <div class="drop-zone" id="dropZone">
       <input type="file" id="imageFile" accept="image/*,.heic,.heif">
@@ -149,6 +185,17 @@
     </div>
   </div>
 
+  <!-- ===== batch photos ===== -->
+  <div class="batch-only">
+    <div class="section-label">Photos</div>
+    <div class="drop-zone" id="batchDrop">
+      <input type="file" id="batchFiles" accept="image/*,.heic,.heif" multiple>
+      <div class="drop-icon">🗂️</div>
+      <p><strong>Choose several photos</strong>Each one is checked for its time of day and light</p>
+    </div>
+    <div class="batch-status" id="batchStatus"></div>
+  </div>
+
   <hr class="divider">
 
   <div>
@@ -157,6 +204,7 @@
       <option value="iPhone 17 Pro">iPhone 17 Pro</option>
       <option value="iPhone 15 Pro">iPhone 15 Pro</option>
       <option value="iPhone 14 Pro">iPhone 14 Pro</option>
+      <option value="iPhone 12 Pro">iPhone 12 Pro</option>
       <option value="iPhone 12 Pro Max">iPhone 12 Pro Max</option>
     </select>
     <div class="input-hint">The iOS version is picked to match the photo date</div>
@@ -190,7 +238,7 @@
   <hr class="divider">
 
   <div>
-    <div class="section-label">Location <span style="color:#333;font-weight:400">(optional)</span></div>
+    <div class="section-label">Location <span class="single-only" style="color:#333;font-weight:400">(optional)</span><span class="batch-only" style="color:#9099ff;font-weight:400">(needed)</span></div>
     <div class="input-row two" style="margin-top:0">
       <select id="usState" onchange="onStateChange()">
         <option value="">Manual (type below)</option>
@@ -216,19 +264,44 @@
       </div>
     </div>
     <div class="input-hint" id="spotInfo" style="margin-top:8px"></div>
+    <div class="batch-only" style="margin-top:12px">
+      <select id="batchSpread">
+        <option value="30">All photos at the same spot (within ~30 m)</option>
+        <option value="200">Same street (within ~200 m)</option>
+        <option value="1000">Same neighbourhood (within ~1 km)</option>
+      </select>
+    </div>
   </div>
 
   <hr class="divider">
 
-  <div>
+  <!-- single: exact date + time -->
+  <div class="single-only">
     <div class="section-label">Date &amp; Time Taken</div>
     <input type="datetime-local" id="recordDate">
     <div class="input-hint">Clock time at the GPS location (Ireland time if no GPS). Leave blank to use the time now.</div>
   </div>
 
+  <!-- batch: day + options -->
+  <div class="batch-only">
+    <div class="section-label">Day Taken</div>
+    <input type="date" id="batchDate">
+    <div class="input-hint">Leave blank: photos keep their own date &amp; time if they have one, the rest go on yesterday. Pick a day: every photo gets a new time on that day, in its part of the day (based on the real sunrise &amp; sunset there).</div>
+    <label class="check" style="margin-top:14px">
+      <input type="checkbox" id="batchUseOwn" checked>
+      Use each photo's own time &amp; light readings if it has them
+    </label>
+    <div class="input-row two">
+      <div>
+        <input type="number" id="batchStart" placeholder="Start no." min="1" max="9999" step="1">
+        <div class="input-hint">First file number, e.g. 4521 &rarr; IMG_4521. Blank = random</div>
+      </div>
+    </div>
+  </div>
+
   <hr class="divider">
 
-  <div>
+  <div class="single-only">
     <div class="section-label">Camera Exposure</div>
     <select id="expPreset" onchange="applyExposurePreset()">
       <option value="auto">Auto &mdash; match the time of day</option>
@@ -262,19 +335,26 @@
     <div class="input-hint" style="margin-top:10px">Any box left blank is filled in automatically to suit the date &amp; time above.</div>
   </div>
 
-  <hr class="divider">
+  <hr class="divider single-only">
 
-  <div>
+  <div class="single-only">
     <div class="section-label">Output Filename</div>
     <input type="text" id="outputFilename" placeholder="e.g. IMG_0472" maxlength="80">
     <div class="input-hint">No spaces or special chars &mdash; extension added automatically</div>
+  </div>
+
+  <!-- batch: list of photos with their planned details -->
+  <div class="batch-only">
+    <div class="section-label">Your Photos</div>
+    <div class="batch-sun" id="batchSun"></div>
+    <div class="batch-list" id="batchList"><div class="row-note">No photos yet.</div></div>
   </div>
 
   <hr class="divider">
 
   <div class="error-box" id="errorBox"></div>
 
-  <div class="progress-wrap" id="progressWrap">
+  <div class="progress-wrap single-only" id="progressWrap">
     <div class="progress-bar-bg"><div class="progress-bar" id="progressBar"></div></div>
     <div class="progress-steps">
       <div class="step" id="step1">&#9679; Stripping original metadata</div>
@@ -284,9 +364,16 @@
     </div>
   </div>
 
-  <div class="success-box" id="successBox">&#10003; Done! Your tagged image downloaded automatically.</div>
+  <div class="success-box single-only" id="successBox">&#10003; Done! Your tagged image downloaded automatically.</div>
 
-  <button class="submit-btn" id="submitBtn" onclick="processImage()">Tag Image &rarr;</button>
+  <button class="submit-btn single-only" id="submitBtn" onclick="processImage()">Tag Image &rarr;</button>
+
+  <div class="btn-row batch-only">
+    <div class="success-box" id="batchDone"></div>
+    <button class="submit-btn" id="saveAllBtn" style="display:none" onclick="saveAll()">Save all photos &darr;</button>
+    <button class="submit-btn" id="tagAllBtn" onclick="tagAll()" disabled>Tag all photos &rarr;</button>
+    <button class="second-btn" id="newTimesBtn" onclick="planBatch()" disabled>&#127922; New times, names &amp; spots</button>
+  </div>
 
 </div>
 
@@ -331,6 +418,21 @@
       };
       reader.readAsDataURL(file);
     }
+  }
+
+  // ---- one photo / batch switch ----
+  let batchMode = false;
+  let singleModel = document.getElementById('iphoneModel').value;
+  function setMode(on) {
+    if (on === batchMode) return;
+    batchMode = on;
+    document.body.classList.toggle('batch', on);
+    document.getElementById('tabSingle').classList.toggle('on', !on);
+    document.getElementById('tabBatch').classList.toggle('on', on);
+    const modelSel = document.getElementById('iphoneModel');
+    if (on) { singleModel = modelSel.value; modelSel.value = 'iPhone 12 Pro'; schedulePlan(); }
+    else modelSel.value = singleModel;
+    hideError();
   }
 
   // ---- keep original pixels switch ----
@@ -387,6 +489,7 @@
     document.getElementById('lon').value = rlon.toFixed(6);
     document.getElementById('alt').value = (alt + (Math.random() * 8 - 4)).toFixed(3);
     document.getElementById('spotInfo').textContent = 'Spot: ' + name + ', ' + st.name;
+    schedulePlan();
   }
 
   // ---- exposure presets ----
@@ -509,6 +612,314 @@
       showError(e.message);
     } finally {
       document.getElementById('submitBtn').disabled = false;
+    }
+  }
+
+  // =====================================================================
+  // ---- BATCH MODE ----
+  // 1. each photo is checked by the server (/analyze)
+  // 2. the server plans times, names, spots and exposure for all (/plan)
+  // 3. "Tag all" sends each photo to /process with its planned values
+  // =====================================================================
+  const BUCKET_LABELS = { morning: '🌅 Morning', day: '☀️ Daytime', evening: '🌇 Evening', night: '🌙 Night' };
+  let batchItems = [];   // { file, url, info, bucket, changed, plan, result, error }
+  let batchBusy = false;
+  let planSeq = 0;
+  let planTimer = null;
+
+  const batchInput = document.getElementById('batchFiles');
+  batchInput.addEventListener('change', () => { if (batchInput.files.length) loadBatch([...batchInput.files]); });
+  const batchDrop = document.getElementById('batchDrop');
+  batchDrop.addEventListener('dragover', e => { e.preventDefault(); batchDrop.classList.add('drag-over'); });
+  batchDrop.addEventListener('dragleave', () => batchDrop.classList.remove('drag-over'));
+  batchDrop.addEventListener('drop', e => {
+    e.preventDefault();
+    batchDrop.classList.remove('drag-over');
+    const files = [...e.dataTransfer.files].filter(f => f.type.startsWith('image/') || /\.(heic|heif)$/i.test(f.name));
+    if (files.length) loadBatch(files);
+  });
+
+  // Any change to these settings = new plan
+  ['lat', 'lon', 'alt'].forEach(id => document.getElementById(id).addEventListener('input', schedulePlan));
+  ['iphoneModel', 'batchSpread', 'batchDate', 'batchUseOwn'].forEach(id => document.getElementById(id).addEventListener('change', schedulePlan));
+  document.getElementById('batchStart').addEventListener('input', schedulePlan);
+
+  function setBatchStatus(t) { document.getElementById('batchStatus').textContent = t; }
+
+  function updateButtons() {
+    const planned = batchItems.length && batchItems.every(it => it.plan);
+    document.getElementById('tagAllBtn').disabled = batchBusy || !planned;
+    document.getElementById('tagAllBtn').textContent = `Tag all ${batchItems.length || ''} photos →`.replace('  ', ' ');
+    document.getElementById('newTimesBtn').disabled = batchBusy || !batchItems.some(it => it.info);
+    batchInput.disabled = batchBusy;
+  }
+
+  async function loadBatch(files) {
+    if (batchBusy) return;
+    if (files.length > 100) { showError('Up to 100 photos at a time.'); return; }
+    hideError();
+    batchItems.forEach(it => { URL.revokeObjectURL(it.url); if (it.result) URL.revokeObjectURL(it.result.url); });
+    batchItems = files.map(file => ({ file, url: URL.createObjectURL(file), bucket: 'day', changed: false }));
+    document.getElementById('batchDone').classList.remove('show');
+    document.getElementById('saveAllBtn').style.display = 'none';
+    document.getElementById('batchSun').textContent = '';
+    batchBusy = true;
+    updateButtons();
+    renderBatch();
+
+    for (let i = 0; i < batchItems.length; i++) {
+      const it = batchItems[i];
+      setBatchStatus(`Checking photo ${i + 1} of ${batchItems.length}…`);
+      try {
+        const form = new FormData();
+        form.append('image', it.file);
+        const res = await fetch('/analyze', { method: 'POST', body: form });
+        const data = await res.json().catch(() => ({ error: 'Server error' }));
+        if (!res.ok) throw new Error(data.error || 'Check failed');
+        it.info = data;
+        it.bucket = data.bucket;
+      } catch (e) {
+        it.error = e.message;
+      }
+      renderBatch();
+    }
+    // Photos that couldn't be read are left out
+    const bad = batchItems.filter(it => !it.info).length;
+    batchItems = batchItems.filter(it => it.info);
+    batchBusy = false;
+    setBatchStatus(`${batchItems.length} photo${batchItems.length === 1 ? '' : 's'} checked` + (bad ? ` (${bad} couldn't be read and were left out)` : ''));
+    updateButtons();
+    planBatch();
+  }
+
+  function schedulePlan() {
+    if (!batchMode || batchBusy || !batchItems.some(it => it.info)) return;
+    clearTimeout(planTimer);
+    planTimer = setTimeout(planBatch, 400);
+  }
+
+  async function planBatch() {
+    if (batchBusy || !batchItems.length) return;
+    const seq = ++planSeq;
+    hideError();
+    const body = {
+      model: document.getElementById('iphoneModel').value,
+      lat: document.getElementById('lat').value,
+      lon: document.getElementById('lon').value,
+      alt: document.getElementById('alt').value,
+      date: document.getElementById('batchDate').value,
+      spread: document.getElementById('batchSpread').value,
+      startNum: document.getElementById('batchStart').value,
+      useOwn: document.getElementById('batchUseOwn').checked,
+      items: batchItems.map(it => ({
+        bucket: it.bucket, changed: it.changed,
+        photoTime: it.info.photoTime, photoBv: it.info.photoBv, luma: it.info.luma,
+      })),
+    };
+    try {
+      const res = await fetch('/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const data = await res.json().catch(() => ({ error: 'Server error' }));
+      if (seq !== planSeq) return; // a newer plan is on its way
+      if (!res.ok) throw new Error(data.error || 'Planning failed');
+      data.items.forEach((p, i) => {
+        batchItems[i].plan = p;
+        if (batchItems[i].result) { URL.revokeObjectURL(batchItems[i].result.url); batchItems[i].result = null; }
+      });
+      document.getElementById('batchSun').textContent = data.sun
+        ? `Sunrise ${data.sun.sunrise} · Sunset ${data.sun.sunset} (local time there)`
+        : '';
+      document.getElementById('batchDone').classList.remove('show');
+      document.getElementById('saveAllBtn').style.display = 'none';
+    } catch (e) {
+      if (seq !== planSeq) return;
+      batchItems.forEach(it => { it.plan = null; });
+      showError(e.message);
+    }
+    renderBatch();
+    updateButtons();
+  }
+
+  function fmtWhen(s) {
+    // "2026-11-05 16:19:45" -> "Thu 5 Nov 2026, 16:19:45"
+    const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}:\d{2}:\d{2})$/.exec(s || '');
+    if (!m) return s || '';
+    const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    const day = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+    return `${day}, ${m[4]}`;
+  }
+
+  function onBucketChange(i, value) {
+    const it = batchItems[i];
+    it.bucket = value;
+    it.changed = true;
+    schedulePlan();
+  }
+
+  function renderBatch() {
+    const list = document.getElementById('batchList');
+    if (!batchItems.length) { list.innerHTML = '<div class="row-note">No photos yet.</div>'; return; }
+    list.innerHTML = '';
+    batchItems.forEach((it, i) => {
+      const row = document.createElement('div');
+      row.className = 'row';
+
+      const img = document.createElement('img');
+      img.className = 'thumb';
+      img.src = it.url;
+      img.alt = '';
+      img.onerror = () => { img.removeAttribute('src'); };
+      row.appendChild(img);
+
+      const main = document.createElement('div');
+      main.className = 'row-main';
+      const name = document.createElement('div');
+      name.className = 'row-name';
+      name.textContent = it.file.name;
+      main.appendChild(name);
+
+      if (it.error) {
+        const e = document.createElement('div');
+        e.className = 'row-err';
+        e.textContent = it.error;
+        main.appendChild(e);
+      }
+
+      if (!it.info) {
+        if (!it.error) {
+          const w = document.createElement('div');
+          w.className = 'row-note';
+          w.textContent = 'Waiting to be checked…';
+          main.appendChild(w);
+        }
+      } else {
+        const sel = document.createElement('select');
+        Object.entries(BUCKET_LABELS).forEach(([k, label]) => sel.add(new Option(label, k)));
+        sel.value = it.changed ? it.bucket : (it.plan ? it.plan.bucket : it.bucket);
+        sel.disabled = batchBusy;
+        sel.onchange = () => onBucketChange(i, sel.value);
+        main.appendChild(sel);
+
+        if (it.plan) {
+          const p = it.plan;
+          const plan = document.createElement('div');
+          plan.className = 'row-plan';
+          plan.textContent = `${p.filename} · ${fmtWhen(p.date)}`;
+          main.appendChild(plan);
+          const exp = document.createElement('div');
+          exp.className = 'row-note';
+          exp.textContent = `ISO ${p.iso} · ${p.shutter} s · brightness ${p.brightness}`;
+          main.appendChild(exp);
+          const why = document.createElement('div');
+          why.className = 'row-note';
+          const timeWhy = it.changed ? 'Part of day: you picked it'
+            : p.timeSource === 'photo' ? 'Time: the photo\'s own'
+            : it.info.photoTime && document.getElementById('batchUseOwn').checked ? 'Part of day: from the photo\'s own time'
+            : 'Part of day: guessed from the light';
+          const expWhy = p.exposureSource === 'photo' ? 'exposure from the photo\'s own reading' : 'exposure from how bright it looks';
+          why.textContent = `${timeWhy} · ${expWhy}`;
+          main.appendChild(why);
+        }
+
+        if (it.result) {
+          const done = document.createElement('div');
+          done.className = 'row-done';
+          const a = document.createElement('a');
+          a.href = it.result.url;
+          a.download = it.result.name;
+          a.textContent = `✓ ${it.result.name} — tap to download`;
+          done.appendChild(a);
+          main.appendChild(done);
+        }
+      }
+      row.appendChild(main);
+      list.appendChild(row);
+    });
+  }
+
+  async function tagAll() {
+    if (batchBusy || !batchItems.length || !batchItems.every(it => it.plan)) return;
+    hideError();
+    batchBusy = true;
+    updateButtons();
+    document.getElementById('batchDone').classList.remove('show');
+    document.getElementById('saveAllBtn').style.display = 'none';
+    const format = document.getElementById('outputFormat').value;
+    const model = document.getElementById('iphoneModel').value;
+    const keep = document.getElementById('keepPixels').checked ? '1' : '0';
+    let ok = 0;
+
+    for (let i = 0; i < batchItems.length; i++) {
+      const it = batchItems[i];
+      const p = it.plan;
+      setBatchStatus(`Tagging photo ${i + 1} of ${batchItems.length}…`);
+      it.error = null;
+      if (it.result) { URL.revokeObjectURL(it.result.url); it.result = null; }
+      try {
+        const form = new FormData();
+        form.append('image', it.file);
+        form.append('model', model);
+        form.append('format', format);
+        form.append('keepPixels', keep);
+        form.append('lat', p.lat);
+        form.append('lon', p.lon);
+        form.append('alt', p.alt);
+        form.append('iso', p.iso);
+        form.append('shutter', p.shutter);
+        form.append('brightness', p.brightness);
+        form.append('bias', '0');
+        form.append('filename', p.filename);
+        form.append('date', p.date);
+        form.append('exactTime', '1');
+        form.append('upperExt', '1');
+        const res = await fetch('/process', { method: 'POST', body: form });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: 'Server error' }));
+          throw new Error(err.error || 'Processing failed');
+        }
+        const blob = await res.blob();
+        const cd = res.headers.get('Content-Disposition') || '';
+        const m = /filename="([^"]+)"/.exec(cd);
+        const name = m ? m[1] : p.filename;
+        it.result = { blob, name, url: URL.createObjectURL(blob) };
+        ok++;
+      } catch (e) {
+        it.error = e.message;
+      }
+      renderBatch();
+    }
+
+    batchBusy = false;
+    const failed = batchItems.length - ok;
+    setBatchStatus('');
+    const done = document.getElementById('batchDone');
+    done.textContent = `✓ ${ok} photo${ok === 1 ? '' : 's'} ready` + (failed ? ` · ${failed} failed (see the red notes)` : '') + '. Tap "Save all photos".';
+    done.classList.add('show');
+    document.getElementById('saveAllBtn').style.display = ok ? 'block' : 'none';
+    renderBatch();
+    updateButtons();
+  }
+
+  // Share sheet on iPhone ("Save X Images" / "Save to Files"); downloads one by one elsewhere
+  async function saveAll() {
+    const results = batchItems.filter(it => it.result).map(it => it.result);
+    if (!results.length) return;
+    const files = results.map(r => new File([r.blob], r.name, { type: r.blob.type || 'application/octet-stream' }));
+    if (navigator.canShare && navigator.canShare({ files })) {
+      try {
+        await navigator.share({ files });
+        return;
+      } catch (e) {
+        if (e.name === 'AbortError') return; // closed the share sheet
+      }
+    }
+    for (const r of results) {
+      const a = document.createElement('a');
+      a.href = r.url;
+      a.download = r.name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      await new Promise(ok => setTimeout(ok, 800));
     }
   }
 
